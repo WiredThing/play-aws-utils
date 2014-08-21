@@ -8,31 +8,35 @@ import fly.play.aws.auth.Signer
 import play.api.http.ContentTypeOf
 import play.api.http.Writeable
 import play.api.libs.iteratee.Iteratee
-import play.api.libs.ws.ResponseHeaders
-import play.api.libs.ws.SignatureCalculator
-import play.api.libs.ws.WSRequest
-import play.api.Application
-import play.api.libs.ws.WSRequestHolder
-import play.api.libs.ws.WSSignatureCalculator
-import play.api.libs.ws.WSResponseHeaders
+import play.api.libs.ws._
+import play.api.{Logger, Application}
 import scala.concurrent.ExecutionContext
-import play.api.libs.ws.WS
-import play.api.libs.ws.WSResponse
 
 /**
  * Amazon Web Services
  */
 object Aws {
-
   def withSigner(signer: Signer) = AwsRequestBuilder(signer)
 
+  def proxyHost(implicit app: Application): Option[String] = PlayConfiguration.optional("aws.proxyHost")
+
+  def proxyPort(implicit app: Application): Int = PlayConfiguration.optional("aws.proxyPort").getOrElse("80").toInt
+
+  def proxyServer(implicit app: Application): Option[WSProxyServer] = proxyHost.map(host => new DefaultWSProxyServer(host, proxyPort))
+
   case class AwsRequestBuilder(signer: Signer) {
-    def url(url: String)(implicit app:Application): AwsRequestHolder = 
-      AwsRequestHolder(WS.url(url).withFollowRedirects(true), signer)
+    def url(url: String)(implicit app: Application): AwsRequestHolder = {
+      val wsRequest = proxyServer match {
+        case None => WS.url(url)
+        case Some(ps) => Logger.debug(s"Calling $url using proxy at ${ps.host}"); WS.url(url).withProxyServer(ps)
+      }
+      AwsRequestHolder(wsRequest.withFollowRedirects(true), signer)
+    }
   }
 
   case class AwsRequestHolder(wrappedRequest: WSRequestHolder, signer: Signer) {
     def headers = wrappedRequest.headers
+
     def queryString = wrappedRequest.queryString
 
     def withHeaders(headers: (String, String)*): AwsRequestHolder =
@@ -42,28 +46,29 @@ object Aws {
       this.copy(wrappedRequest = wrappedRequest.withQueryString(parameters: _*))
 
     val sign = signer.sign(wrappedRequest, _: String)
+
     def sign[T](method: String, body: T)(implicit wrt: Writeable[T], ct: ContentTypeOf[T]) =
       signer.sign(wrappedRequest, method, body)
 
     def get(): Future[WSResponse] =
       sign("GET").get
 
-    def get[A](consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit ec:ExecutionContext): Future[Iteratee[Array[Byte], A]] =
+    def get[A](consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit ec: ExecutionContext): Future[Iteratee[Array[Byte], A]] =
       sign("GET").get(consumer)
 
     def post[T](body: T)(implicit wrt: Writeable[T], ct: ContentTypeOf[T]): Future[WSResponse] =
       sign("POST", body).post(body)
 
-    def postAndRetrieveStream[A, T](body: T)(consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit wrt: Writeable[T], ct: ContentTypeOf[T], ec:ExecutionContext): Future[Iteratee[Array[Byte], A]] =
+    def postAndRetrieveStream[A, T](body: T)(consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit wrt: Writeable[T], ct: ContentTypeOf[T], ec: ExecutionContext): Future[Iteratee[Array[Byte], A]] =
       sign("POST", body).postAndRetrieveStream(body)(consumer)
 
     def put[T](body: T)(implicit wrt: Writeable[T], ct: ContentTypeOf[T]): Future[WSResponse] =
       sign("PUT", body).put(body)
 
-    def put:Future[WSResponse] =
+    def put: Future[WSResponse] =
       put("")
 
-    def putAndRetrieveStream[A, T](body: T)(consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit wrt: Writeable[T], ct: ContentTypeOf[T], ec:ExecutionContext): Future[Iteratee[Array[Byte], A]] =
+    def putAndRetrieveStream[A, T](body: T)(consumer: WSResponseHeaders => Iteratee[Array[Byte], A])(implicit wrt: Writeable[T], ct: ContentTypeOf[T], ec: ExecutionContext): Future[Iteratee[Array[Byte], A]] =
       sign("PUT", body).putAndRetrieveStream(body)(consumer)
 
     def delete(): Future[WSResponse] =
@@ -80,7 +85,7 @@ object Aws {
   object dates {
     lazy val timeZone = new SimpleTimeZone(0, "UTC")
 
-    def dateFormat(format: String, locale:Locale = Locale.getDefault): SimpleDateFormat = {
+    def dateFormat(format: String, locale: Locale = Locale.getDefault): SimpleDateFormat = {
       val df = new SimpleDateFormat(format, locale)
       df setTimeZone timeZone
       df
@@ -93,4 +98,5 @@ object Aws {
     lazy val rfc822DateFormat = dateFormat("EEE, dd MMM yyyy HH:mm:ss z", Locale.US);
 
   }
+
 }
