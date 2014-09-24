@@ -10,4 +10,6 @@ object PlayConfiguration {
    */
   def apply(key: String)(implicit app: Application): String =
     app.configuration.getString(key).getOrElse(throw new PlayException("Configuration error", "Could not find " + key + " in settings"))
+
+  def optional(key: String)(implicit app: Application): Option[String] = app.configuration.getString(key)
 }
