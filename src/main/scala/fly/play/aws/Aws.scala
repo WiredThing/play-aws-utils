@@ -28,7 +28,7 @@ object Aws {
     def url(url: String)(implicit app: Application): AwsRequestHolder = {
       val wsRequest = proxyServer match {
         case None => WS.url(url)
-        case Some(ps) => Logger.debug(s"Calling $url using proxy at ${ps.host}"); WS.url(url).withProxyServer(ps)
+        case Some(ps) => WS.url(url).withProxyServer(ps)
       }
       AwsRequestHolder(wsRequest.withFollowRedirects(true), signer)
     }
