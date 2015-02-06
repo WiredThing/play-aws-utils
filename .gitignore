@@ -1,9 +1,7 @@
 logs
 project/project
-project/target
 target
 tmp
-.history
 dist
 /.settings
 /.cache
@@ -11,3 +9,4 @@ dist
 /.project
 test/conf
 .target
+.idea
